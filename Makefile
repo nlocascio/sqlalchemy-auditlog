@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := test
 
 install:
-	poetry install -E sqlalchemy
+	poetry install -E postgres
 
 build:
 	poetry build

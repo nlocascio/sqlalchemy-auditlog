@@ -1,7 +1,7 @@
 import textwrap
-from typing import List
+from typing import List, Literal, Union
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Table, insert, select, text
 
 
 def install_audit_triggers(metadata, connection):
@@ -17,47 +17,61 @@ def install_audit_triggers(metadata, connection):
 
 def create_audit_trigger_ddl(
     table_name: str,
-    schema: str,
     audit_table_name: str,
+    schema: str,
     columns: List[Column],
     audit_operation_columns: List[Column],
+    session_setting_columns: List[Column],
 ):
     trigger_name = f"audit_{schema}_{table_name}"
-    column_names = ", ".join(c.name for c in columns + audit_operation_columns)
 
-    insert_elements = [f'NEW."{c.name}"' for c in columns]
-    update_elements = [f'NEW."{c.name}"' for c in columns]
-    delete_elements = [f'OLD."{c.name}"' for c in columns]
+    column_names = ", ".join(f"\"{c.name}\"" for c in columns + audit_operation_columns + session_setting_columns)
 
-    insert_elements.extend(
-        [
-            "'I'",
-            "now()",
-        ]
+    insert_stmt = INSERT_STMT_TEMPLATE.format(
+        audit_table_name=f"{schema}.{audit_table_name}",
+        columns=column_names,
+        values=_get_values_for_operation(columns, session_setting_columns, "insert"),
     )
-    update_elements.extend(
-        [
-            "'U'",
-            "now()",
-        ]
+
+    update_stmt = INSERT_STMT_TEMPLATE.format(
+        audit_table_name=f"{schema}.{audit_table_name}",
+        columns=column_names,
+        values=_get_values_for_operation(columns, session_setting_columns, "update"),
     )
-    delete_elements.extend(
-        [
-            "'D'",
-            "now()",
-        ]
+
+    delete_stmt = INSERT_STMT_TEMPLATE.format(
+        audit_table_name=f"{schema}.{audit_table_name}",
+        columns=column_names,
+        values=_get_values_for_operation(columns, session_setting_columns, "delete"),
     )
 
     return PROCEDURE_TEMPLATE.format(
         trigger_name=trigger_name,
         table_name=f"{schema}.{table_name}",
-        audit_table_name=f"{schema}.{audit_table_name}",
-        column_names=column_names,
-        insert_elements=", ".join(insert_elements),
-        update_elements=", ".join(update_elements),
-        delete_elements=", ".join(delete_elements),
+        insert_stmt=insert_stmt,
+        update_stmt=update_stmt,
+        delete_stmt=delete_stmt,
     )
 
+
+def _get_values_for_operation(columns: List[Column], session_setting_columns: List[Column], operation: Union[Literal["insert"], Literal["update"], Literal["delete"]]):
+    session_setting_values = [f"current_setting('audit.{c.name}')" for c in session_setting_columns]
+
+    if operation == "insert":
+        values = [f"NEW.\"{c.name}\"" for c in columns] + ["'I'", "current_user", "NOW()"] + session_setting_values
+    elif operation == "update":
+        values = [f"NEW.\"{c.name}\"" for c in columns] + ["'U'", "current_user", "NOW()"] + session_setting_values
+    elif operation == "delete":
+        values = [f"OLD.\"{c.name}\"" for c in columns] + ["'D'", "current_user", "NOW()"] + session_setting_values
+
+    return ", ".join(values)
+
+
+INSERT_STMT_TEMPLATE = textwrap.dedent(
+    """\
+        INSERT INTO {audit_table_name} ({columns}) SELECT {values};
+    """
+)
 
 PROCEDURE_TEMPLATE = textwrap.dedent(
     """\
@@ -67,11 +81,11 @@ PROCEDURE_TEMPLATE = textwrap.dedent(
     $$
     BEGIN
         IF (TG_OP = 'INSERT') THEN
-            INSERT INTO {audit_table_name} ({column_names}) SELECT {insert_elements};
+            {insert_stmt}
         ELSIF (TG_OP = 'UPDATE') THEN
-            INSERT INTO {audit_table_name} ({column_names}) SELECT {update_elements};
+            {update_stmt}
         ELSIF (TG_OP = 'DELETE') THEN
-            INSERT INTO {audit_table_name} ({column_names}) SELECT {delete_elements};
+            {delete_stmt}
         END IF;
         RETURN NULL;
     END;

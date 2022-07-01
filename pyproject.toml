@@ -10,6 +10,8 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.9,<4.0"
 SQLAlchemy = ">=1.4"
+psycopg2 = {version = "*", optional = true}
+psycopg2-binary = {version = "*", optional = true}
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
@@ -20,9 +22,12 @@ coverage = "^6.4.1"
 flake8 = "^4.0.1"
 isort = "^5.10.1"
 mypy = "^0.961"
-pydocstyle = {extras = ["toml"], version = "^6.1.1"}
+pydocstyle = {version = "^6.1.1", extras = ["toml"]}
 SQLAlchemy = {version = ">=1.4", extras = ["mypy"]}
-psycopg2 = {version = "*"}
+
+[tool.poetry.extras]
+postgres = ['psycopg2']
+postgres-binary = ['psycopg2-binary']
 
 [tool.isort]
 profile = 'black'
